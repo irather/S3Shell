@@ -1,2 +1,4 @@
 # .gitignore
 S5-S3.conf
+
+venv/
