@@ -64,8 +64,33 @@ class S5Shell:
         print(f"S5{self.currentLocation}>", end=" ")
 
     def listContents(self, command):
-        _, s3Location = command.split()
-        print(f"Listing contents of: {s3Location}")
+        try:
+            _, s3Location = command.split()
+
+            if s3Location == '/':
+                # List buckets if the specified location is '/'
+                response = self.s3Client.list_buckets()
+                buckets = [bucket['Name'] for bucket in response['Buckets']]
+
+                if not buckets:
+                    print("No buckets found in the root directory.")
+                else:
+                    print("\n".join(buckets))
+            else:
+                # List objects in the specified S3 location
+                response = self.s3Client.list_objects(Bucket=s3Location[1:], Delimiter='/')
+
+                if 'Contents' in response:
+                    contents = [obj['Key'] for obj in response['Contents']]
+                    print("\n".join(contents))
+                else:
+                    print(f"No objects found in '{s3Location}'")
+
+            print(f"S5{self.currentLocation}>", end=" ")
+
+        except Exception as e:
+            print(f"Cannot list contents of this S3 location. Error: {str(e)}")
+            print(f"S5{self.currentLocation}>", end=" ")
 
     def copyLocalToCloud(self, command):
         try:
