@@ -10,26 +10,6 @@ class S5Shell:
         self.connectToAWS()
         self.runShell()
 
-    def connectToAWS(self):
-        try:
-            # Read AWS credentials from configuration file
-            config = configparser.ConfigParser()
-            config.read('S5-S3.conf')
-
-            aws_access_key_id = config['default']['aws_access_key_id']
-            aws_secret_access_key = config['default']['aws_secret_access_key']
-
-            # Establish connection to AWS S3
-            self.s3Client = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
-
-            # Connection successful, display welcome message
-            self.printWelcomeMessage(success=True)
-            return 0
-        except Exception as e:
-            # Connection unsuccessful, display error message
-            self.printWelcomeMessage(success=False, error_message=str(e))
-            return 1
-
     def printWelcomeMessage(self, success, errorMessage=None):
         if success:
             print("Welcome to the AWS S3 Storage Shell (S5)")
@@ -42,22 +22,79 @@ class S5Shell:
                 print(f"Error: {errorMessage}")
             print("Please review procedures for authenticating your account on AWS S3")
 
-    def runShell(self):
-        while True:
-            command = input()
+    def connectToAWS(self):
+        try:
+            # Read AWS credentials from configuration file
+            config = configparser.ConfigParser()
+            config.read('S5-S3.conf')
 
-            if command.lower() in ['quit', 'exit']:
-                break
-            elif command.startswith('create_bucket'):
-                self.createBucket(command)
-            elif command.startswith('chlocn'):
-                self.changeLocation(command)
-            elif command.startswith('list'):
-                self.listContents(command)
-            elif command.startswith('locs3cp'):
-                self.copyLocalToCloud(command)
-            else:
-                self.executeLocalCommand(command)
+            aws_access_key_id = config['default']['aws_access_key_id']
+            aws_secret_access_key = config['default']['aws_secret_access_key']
+
+            # Establish connection to AWS S3
+            self.s3Client = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+            self.s3_resource = boto3.resource('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+
+            # Connection successful, display welcome message
+            self.printWelcomeMessage(success=True)
+            return 0
+        except Exception as e:
+            # Connection unsuccessful, display error message
+            self.printWelcomeMessage(success=False, error_message=str(e))
+            return 1
+        
+    def copyLocalToCloud(self, command):
+        try:
+            _, localFolderPath, s3Destination = command.split()
+
+            if not os.path.isdir(localFolderPath):
+                raise FileNotFoundError(f"Local folder '{localFolderPath}' not found.")
+
+            # Ensure the last character of localFolderPath is '/'
+            if not localFolderPath.endswith('/'):
+                localFolderPath += '/'
+
+            # Extract the bucket name from the destination path
+            bucket_name, s3_prefix = s3Destination.split('/', 1)
+
+            # If the local folder path is provided as an absolute path, adjust the S3 prefix accordingly
+            if localFolderPath.startswith('/'):
+                localFolderPath = localFolderPath[1:]
+                s3_prefix = os.path.join(s3_prefix, os.path.basename(localFolderPath))
+
+            # Walk through the local directory and upload each file
+            for root, _, files in os.walk(localFolderPath):
+                for file in files:
+                    localFilePath = os.path.join(root, file)
+                    s3ObjectKey = os.path.join(s3_prefix, os.path.relpath(localFilePath, localFolderPath))
+
+                    self.s3Client.upload_file(localFilePath, bucket_name, s3ObjectKey)
+
+            print(f"Successfully copied '{localFolderPath}' to '{s3Destination}'")
+            print(f"S5{self.currentLocation}>", end=" ")
+            return 0
+        except Exception as e:
+            print(f"Unsuccessful copy. Error: {str(e)}")
+            print(f"S5{self.currentLocation}>", end=" ")
+            return 1
+
+    def executeLocalShellCommand(self, command):
+        try:
+            subprocess.run(command, shell=True, check=True)
+            print(f"S5{self.currentLocation}>", end=" ")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to execute command. Error: {e}")
+            print(f"S5{self.currentLocation}>", end=" ")
+
+    def executeLocalCommand(self, command):
+        # Use -r flag for directories
+        nonCloudCommands = ['cd', 'ls', 'pwd', 'echo', 'mkdir', 'rm', 'mv', 'cp', 'cat']
+
+        if any(command.startswith(cmd) for cmd in nonCloudCommands):
+            self.executeLocalShellCommand(command)
+        else:
+            # For any other commands, pass to the session's shell
+            os.system(command)
 
     def createBucket(self, command):
         try:
@@ -85,16 +122,47 @@ class S5Shell:
             print(f"Cannot create bucket. Error: {str(e)}")
             print(f"S5{self.currentLocation}>", end=" ")
             return 1
-
+        
+    def get_bucket_and_directory(self):
+        # Split currentLocation into bucket name and directory path
+        parts = self.currentLocation.strip('/').split('/')
+        if len(parts) == 1:
+            # If there is only one part, it's the bucket name and there is no directory
+            return parts[0], ''
+        else:
+            # If there are more than one parts, the first is the bucket name, and the rest is the directory path
+            return parts[0], '/'.join(parts[1:])
+        
     def changeLocation(self, command):
         try:
             _, newLocation = command.split()
+
+            # Ensure the new location starts with '/'
+            if not newLocation.startswith('/'):
+                raise ValueError("Invalid location format. Location must start with '/'.")
+
             self.currentLocation = newLocation
-            print(f"Changing location to: {newLocation}")
+            print(f"Changing location to: {self.currentLocation}")
+
+            # Change the directory in AWS S3 using boto3
+            bucket_name, directory_path = self.get_bucket_and_directory()
+            bucket = self.s3_resource.Bucket(bucket_name)
+
+            # Check if the directory exists
+            for obj in bucket.objects.filter(Prefix=directory_path):
+                if obj.key == directory_path:
+                    print(f"S5{self.currentLocation}>", end=" ")
+                    return 0
+                else:
+                    print(f"Cannot change folder. Error: Directory does not exist.")
+                    return 1
+
             print(f"S5{self.currentLocation}>", end=" ")
             return 0
+
         except Exception as e:
-            print(f"Cannot change location. Error: {str(e)}")
+            print(f"Cannot change folder. Error: {str(e)}")
+            print(f"S5{self.currentLocation}>", end=" ")
             return 1
 
     def listContents(self, command):
@@ -121,47 +189,30 @@ class S5Shell:
                     print(f"No objects found in '{s3Location}'")
 
             print(f"S5{self.currentLocation}>", end=" ")
-
+            return 0
         except Exception as e:
             print(f"Cannot list contents of this S3 location. Error: {str(e)}")
             print(f"S5{self.currentLocation}>", end=" ")
+            return 1
 
-        
-    def copyLocalToCloud(self, command):
-        try:
-            _, localFilePath, s3Destination = command.split()
+    def runShell(self):
+        while True:
+            command = input()
 
-            if not os.path.isfile(localFilePath):
-                raise FileNotFoundError(f"Local file '{localFilePath}' not found.")
-
-            bucketName, s3ObjectKey = s3Destination.split('/', 1)
-
-            self.s3Client.upload_file(localFilePath, bucketName, s3ObjectKey)
-
-            print(f"Successfully copied '{localFilePath}' to '{s3Destination}'")
-            print(f"S5{self.currentLocation}>", end=" ")
-
-        except Exception as e:
-            print(f"Unsuccessful copy. Error: {str(e)}")
-            print(f"S5{self.currentLocation}>", end=" ")
-
-    def executeLocalCommand(self, command):
-        # Use -r flag for directories
-        nonCloudCommands = ['cd', 'ls', 'pwd', 'echo', 'mkdir', 'rm', 'mv', 'cp', 'cat']
-
-        if any(command.startswith(cmd) for cmd in nonCloudCommands):
-            self.executeLocalShellCommand(command)
-        else:
-            # For any other commands, pass to the session's shell
-            os.system(command)
-
-    def executeLocalShellCommand(self, command):
-        try:
-            subprocess.run(command, shell=True, check=True)
-            print(f"S5{self.currentLocation}>", end=" ")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to execute command. Error: {e}")
-            print(f"S5{self.currentLocation}>", end=" ")
+            if command.lower() in ['quit', 'exit']:
+                break
+            elif command.startswith('create_bucket'):
+                self.createBucket(command)
+            elif command.startswith('chlocn'):
+                self.changeLocation(command)
+            elif command.startswith('list'):
+                self.listContents(command)
+            elif command.startswith('locs3cp'):
+                self.copyLocalToCloud(command)
+            elif command.startswith('cwlocn'):
+                self.currentWorkingLocation()
+            else:
+                self.executeLocalCommand(command)
 
 if __name__ == "__main__":
     s5Shell = S5Shell()
