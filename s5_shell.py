@@ -1,4 +1,5 @@
 import os
+import subprocess
 import configparser
 import boto3
 
@@ -14,10 +15,11 @@ class S5Shell:
             config = configparser.ConfigParser()
             config.read('S5-S3.conf')
 
-            aws_access_key_id = config['default']['aws_access_key_id']
-            aws_secret_access_key = config['default']['aws_secret_access_key']
+            awsAccessKeyId = config['default']['aws_access_key_id']
+            awsSecretAccessKey = config['default']['aws_secret_access_key']
 
-            self.s3Client = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+            self.s3Client = boto3.client('s3', aws_access_key_id=awsAccessKeyId, aws_secret_access_key=awsSecretAccessKey)
+
             self.printWelcomeMessage(success=True)
         except Exception as e:
             self.printWelcomeMessage(success=False, errorMessage=str(e))
@@ -46,27 +48,60 @@ class S5Shell:
                 self.changeLocation(command)
             elif command.startswith('list'):
                 self.listContents(command)
+            elif command.startswith('locs3cp'):
+                self.copyLocalToCloud(command)
             else:
                 self.executeLocalCommand(command)
 
     def createBucket(self, command):
-        # Placeholder for createBucket functionality
         _, bucketName = command.split()
         print(f"Creating bucket: {bucketName}")
 
     def changeLocation(self, command):
-        # Placeholder for changeLocation functionality
         _, newLocation = command.split()
+        self.currentLocation = newLocation
         print(f"Changing location to: {newLocation}")
+        print(f"S5{self.currentLocation}>", end=" ")
 
     def listContents(self, command):
-        # Placeholder for listContents functionality
         _, s3Location = command.split()
         print(f"Listing contents of: {s3Location}")
 
+    def copyLocalToCloud(self, command):
+        try:
+            _, localFilePath, s3Destination = command.split()
+
+            if not os.path.isfile(localFilePath):
+                raise FileNotFoundError(f"Local file '{localFilePath}' not found.")
+
+            bucketName, s3ObjectKey = s3Destination.split('/', 1)
+
+            self.s3Client.upload_file(localFilePath, bucketName, s3ObjectKey)
+
+            print(f"Successfully copied '{localFilePath}' to '{s3Destination}'")
+            print(f"S5{self.currentLocation}>", end=" ")
+
+        except Exception as e:
+            print(f"Unsuccessful copy. Error: {str(e)}")
+            print(f"S5{self.currentLocation}>", end=" ")
+
     def executeLocalCommand(self, command):
-        # Placeholder for executing local commands
-        os.system(command)
+        # Use -r flag for directories
+        nonCloudCommands = ['cd', 'ls', 'pwd', 'echo', 'mkdir', 'rm', 'mv', 'cp', 'cat']
+
+        if any(command.startswith(cmd) for cmd in nonCloudCommands):
+            self.executeLocalShellCommand(command)
+        else:
+            # For any other commands, pass to the session's shell
+            os.system(command)
+
+    def executeLocalShellCommand(self, command):
+        try:
+            subprocess.run(command, shell=True, check=True)
+            print(f"S5{self.currentLocation}>", end=" ")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to execute command. Error: {e}")
+            print(f"S5{self.currentLocation}>", end=" ")
 
 if __name__ == "__main__":
     s5Shell = S5Shell()
