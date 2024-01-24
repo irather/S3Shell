@@ -1,5 +1,4 @@
 import os
-import subprocess
 import configparser
 import boto3
 
@@ -12,23 +11,26 @@ class S5Shell:
 
     def connectToAWS(self):
         try:
+            # Read AWS credentials from configuration file
             config = configparser.ConfigParser()
             config.read('S5-S3.conf')
 
-            awsAccessKeyId = config['default']['aws_access_key_id']
-            awsSecretAccessKey = config['default']['aws_secret_access_key']
+            aws_access_key_id = config['default']['aws_access_key_id']
+            aws_secret_access_key = config['default']['aws_secret_access_key']
 
-            self.s3Client = boto3.client('s3', aws_access_key_id=awsAccessKeyId, aws_secret_access_key=awsSecretAccessKey)
+            # Establish connection to AWS S3
+            self.s3Client = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
 
-            self.printWelcomeMessage(success=True)
+            # Connection successful, display welcome message
+            return 0
         except Exception as e:
-            self.printWelcomeMessage(success=False, errorMessage=str(e))
+            # Connection unsuccessful, display error message
+            return 1
 
     def printWelcomeMessage(self, success, errorMessage=None):
         if success:
             print("Welcome to the AWS S3 Storage Shell (S5)")
             print("You are now connected to your S3 storage")
-            print(f"S5{self.currentLocation}>", end=" ")
         else:
             print("Welcome to the AWS S3 Storage Shell (S5)")
             print("You could not be connected to your S3 storage")
@@ -48,8 +50,6 @@ class S5Shell:
                 self.changeLocation(command)
             elif command.startswith('list'):
                 self.listContents(command)
-            elif command.startswith('locs3cp'):
-                self.copyLocalToCloud(command)
             else:
                 self.executeLocalCommand(command)
 
@@ -58,10 +58,15 @@ class S5Shell:
         print(f"Creating bucket: {bucketName}")
 
     def changeLocation(self, command):
-        _, newLocation = command.split()
-        self.currentLocation = newLocation
-        print(f"Changing location to: {newLocation}")
-        print(f"S5{self.currentLocation}>", end=" ")
+        try:
+            _, newLocation = command.split()
+            self.currentLocation = newLocation
+            print(f"Changing location to: {newLocation}")
+            print(f"S5{self.currentLocation}>", end=" ")
+            return 0
+        except Exception as e:
+            print(f"Cannot change location. Error: {str(e)}")
+            return 1
 
     def listContents(self, command):
         try:
@@ -87,46 +92,22 @@ class S5Shell:
                     print(f"No objects found in '{s3Location}'")
 
             print(f"S5{self.currentLocation}>", end=" ")
+            return 0
 
         except Exception as e:
             print(f"Cannot list contents of this S3 location. Error: {str(e)}")
             print(f"S5{self.currentLocation}>", end=" ")
-
-    def copyLocalToCloud(self, command):
-        try:
-            _, localFilePath, s3Destination = command.split()
-
-            if not os.path.isfile(localFilePath):
-                raise FileNotFoundError(f"Local file '{localFilePath}' not found.")
-
-            bucketName, s3ObjectKey = s3Destination.split('/', 1)
-
-            self.s3Client.upload_file(localFilePath, bucketName, s3ObjectKey)
-
-            print(f"Successfully copied '{localFilePath}' to '{s3Destination}'")
-            print(f"S5{self.currentLocation}>", end=" ")
-
-        except Exception as e:
-            print(f"Unsuccessful copy. Error: {str(e)}")
-            print(f"S5{self.currentLocation}>", end=" ")
+            return 1
 
     def executeLocalCommand(self, command):
-        # Use -r flag for directories
-        nonCloudCommands = ['cd', 'ls', 'pwd', 'echo', 'mkdir', 'rm', 'mv', 'cp', 'cat']
-
-        if any(command.startswith(cmd) for cmd in nonCloudCommands):
-            self.executeLocalShellCommand(command)
-        else:
-            # For any other commands, pass to the session's shell
-            os.system(command)
-
-    def executeLocalShellCommand(self, command):
         try:
-            subprocess.run(command, shell=True, check=True)
+            # Placeholder for executing local commands
+            os.system(command)
+            return 0
+        except Exception as e:
+            print(f"Error executing local command. Error: {str(e)}")
             print(f"S5{self.currentLocation}>", end=" ")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to execute command. Error: {e}")
-            print(f"S5{self.currentLocation}>", end=" ")
+            return 1
 
 if __name__ == "__main__":
     s5Shell = S5Shell()
