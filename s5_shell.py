@@ -23,15 +23,18 @@ class S5Shell:
             self.s3Client = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
 
             # Connection successful, display welcome message
+            self.printWelcomeMessage(success=True)
             return 0
         except Exception as e:
             # Connection unsuccessful, display error message
+            self.printWelcomeMessage(success=False, error_message=str(e))
             return 1
 
     def printWelcomeMessage(self, success, errorMessage=None):
         if success:
             print("Welcome to the AWS S3 Storage Shell (S5)")
             print("You are now connected to your S3 storage")
+            print(f"S5{self.currentLocation}>", end=" ")
         else:
             print("Welcome to the AWS S3 Storage Shell (S5)")
             print("You could not be connected to your S3 storage")
@@ -57,8 +60,31 @@ class S5Shell:
                 self.executeLocalCommand(command)
 
     def createBucket(self, command):
-        _, bucketName = command.split()
-        print(f"Creating bucket: {bucketName}")
+        try:
+            _, bucketName = command.split()
+
+            # Ensure the bucket name follows S3 naming conventions
+            
+            if not bucketName[1:].islower() or not all(char.isalnum() or char in ['-', '.'] for char in bucketName[1:]):
+                raise ValueError("Invalid bucket name. Bucket names must consist only of lowercase letters, numbers, hyphens, and periods.")
+            
+            if not bucketName.startswith('/'):
+                raise ValueError("Invalid bucket name format. Bucket names must start with '/'.")
+
+            existing_buckets = [bucket['Name'].lower() for bucket in self.s3Client.list_buckets().get('Buckets', [])]
+            if bucketName[1:].lower() in existing_buckets:
+                raise ValueError("Bucket with the same name already exists. Please choose a different name.")
+
+            # Perform the S3 bucket creation using boto3 with LocationConstraint
+            self.s3Client.create_bucket(Bucket=bucketName[1:], CreateBucketConfiguration={'LocationConstraint': 'ca-central-1'})
+            print(f"Successfully created bucket: {bucketName}")
+
+            print(f"S5{self.currentLocation}>", end=" ")
+            return 0 
+        except Exception as e:
+            print(f"Cannot create bucket. Error: {str(e)}")
+            print(f"S5{self.currentLocation}>", end=" ")
+            return 1
 
     def changeLocation(self, command):
         try:
@@ -95,12 +121,11 @@ class S5Shell:
                     print(f"No objects found in '{s3Location}'")
 
             print(f"S5{self.currentLocation}>", end=" ")
-            return 0
 
         except Exception as e:
             print(f"Cannot list contents of this S3 location. Error: {str(e)}")
             print(f"S5{self.currentLocation}>", end=" ")
-            return 1
+
         
     def copyLocalToCloud(self, command):
         try:
