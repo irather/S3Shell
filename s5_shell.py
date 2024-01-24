@@ -1,4 +1,5 @@
 import os
+import subprocess
 import configparser
 import boto3
 
@@ -50,6 +51,8 @@ class S5Shell:
                 self.changeLocation(command)
             elif command.startswith('list'):
                 self.listContents(command)
+            elif command.startswith('locs3cp'):
+                self.copyLocalToCloud(command)
             else:
                 self.executeLocalCommand(command)
 
@@ -98,16 +101,42 @@ class S5Shell:
             print(f"Cannot list contents of this S3 location. Error: {str(e)}")
             print(f"S5{self.currentLocation}>", end=" ")
             return 1
+        
+    def copyLocalToCloud(self, command):
+        try:
+            _, localFilePath, s3Destination = command.split()
+
+            if not os.path.isfile(localFilePath):
+                raise FileNotFoundError(f"Local file '{localFilePath}' not found.")
+
+            bucketName, s3ObjectKey = s3Destination.split('/', 1)
+
+            self.s3Client.upload_file(localFilePath, bucketName, s3ObjectKey)
+
+            print(f"Successfully copied '{localFilePath}' to '{s3Destination}'")
+            print(f"S5{self.currentLocation}>", end=" ")
+
+        except Exception as e:
+            print(f"Unsuccessful copy. Error: {str(e)}")
+            print(f"S5{self.currentLocation}>", end=" ")
 
     def executeLocalCommand(self, command):
-        try:
-            # Placeholder for executing local commands
+        # Use -r flag for directories
+        nonCloudCommands = ['cd', 'ls', 'pwd', 'echo', 'mkdir', 'rm', 'mv', 'cp', 'cat']
+
+        if any(command.startswith(cmd) for cmd in nonCloudCommands):
+            self.executeLocalShellCommand(command)
+        else:
+            # For any other commands, pass to the session's shell
             os.system(command)
-            return 0
-        except Exception as e:
-            print(f"Error executing local command. Error: {str(e)}")
+
+    def executeLocalShellCommand(self, command):
+        try:
+            subprocess.run(command, shell=True, check=True)
             print(f"S5{self.currentLocation}>", end=" ")
-            return 1
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to execute command. Error: {e}")
+            print(f"S5{self.currentLocation}>", end=" ")
 
 if __name__ == "__main__":
     s5Shell = S5Shell()
