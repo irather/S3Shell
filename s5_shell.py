@@ -10,6 +10,7 @@ class S5Shell:
         self.connectToAWS()
         self.runShell()
 
+    # Prints a welcome message based on the success of connecting to AWS S3.
     def printWelcomeMessage(self, success, errorMessage=None):
         if success:
             print("Welcome to the AWS S3 Storage Shell (S5)")
@@ -22,27 +23,25 @@ class S5Shell:
                 print(f"Error: {errorMessage}")
             print("Please review procedures for authenticating your account on AWS S3")
 
+    # Connects to AWS S3 using the credentials from the configuration file.
     def connectToAWS(self):
         try:
-            # Read AWS credentials from configuration file
             config = configparser.ConfigParser()
             config.read('S5-S3.conf')
 
             aws_access_key_id = config['default']['aws_access_key_id']
             aws_secret_access_key = config['default']['aws_secret_access_key']
 
-            # Establish connection to AWS S3
             self.s3Client = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
             self.s3_resource = boto3.resource('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
 
-            # Connection successful, display welcome message
             self.printWelcomeMessage(success=True)
             return 0
         except Exception as e:
-            # Connection unsuccessful, display error message
             self.printWelcomeMessage(success=False, error_message=str(e))
             return 1
         
+    # Copies files from a local directory to an S3 bucket.
     def copyLocalToCloud(self, command):
         try:
             _, localFolderPath, s3Destination = command.split()
@@ -50,19 +49,15 @@ class S5Shell:
             if not os.path.isdir(localFolderPath):
                 raise FileNotFoundError(f"Local folder '{localFolderPath}' not found.")
 
-            # Ensure the last character of localFolderPath is '/'
             if not localFolderPath.endswith('/'):
                 localFolderPath += '/'
 
-            # Extract the bucket name from the destination path
             bucket_name, s3_prefix = s3Destination.split('/', 1)
 
-            # If the local folder path is provided as an absolute path, adjust the S3 prefix accordingly
             if localFolderPath.startswith('/'):
                 localFolderPath = localFolderPath[1:]
                 s3_prefix = os.path.join(s3_prefix, os.path.basename(localFolderPath))
 
-            # Walk through the local directory and upload each file
             for root, _, files in os.walk(localFolderPath):
                 for file in files:
                     localFilePath = os.path.join(root, file)
@@ -78,6 +73,7 @@ class S5Shell:
             print(f"S5{self.currentLocation}>", end=" ")
             return 1
 
+    # Executes a shell command locally.
     def executeLocalShellCommand(self, command):
         try:
             subprocess.run(command, shell=True, check=True)
@@ -86,6 +82,7 @@ class S5Shell:
             print(f"Failed to execute command. Error: {e}")
             print(f"S5{self.currentLocation}>", end=" ")
 
+    # Executes a local command, handling both cloud and non-cloud commands.
     def executeLocalCommand(self, command):
         # Use -r flag for directories
         nonCloudCommands = ['cd', 'ls', 'pwd', 'echo', 'mkdir', 'rm', 'mv', 'cp', 'cat']
@@ -93,14 +90,12 @@ class S5Shell:
         if any(command.startswith(cmd) for cmd in nonCloudCommands):
             self.executeLocalShellCommand(command)
         else:
-            # For any other commands, pass to the session's shell
             os.system(command)
 
+    # Creates a new S3 bucket.
     def createBucket(self, command):
         try:
             _, bucketName = command.split()
-
-            # Ensure the bucket name follows S3 naming conventions
             
             if not bucketName[1:].islower() or not all(char.isalnum() or char in ['-', '.'] for char in bucketName[1:]):
                 raise ValueError("Invalid bucket name. Bucket names must consist only of lowercase letters, numbers, hyphens, and periods.")
@@ -112,7 +107,6 @@ class S5Shell:
             if bucketName[1:].lower() in existing_buckets:
                 raise ValueError("Bucket with the same name already exists. Please choose a different name.")
 
-            # Perform the S3 bucket creation using boto3 with LocationConstraint
             self.s3Client.create_bucket(Bucket=bucketName[1:], CreateBucketConfiguration={'LocationConstraint': 'ca-central-1'})
             print(f"Successfully created bucket: {bucketName}")
 
@@ -123,32 +117,42 @@ class S5Shell:
             print(f"S5{self.currentLocation}>", end=" ")
             return 1
         
+    # Extracts the bucket name and directory path from the current location.
     def get_bucket_and_directory(self):
-        # Split currentLocation into bucket name and directory path
         parts = self.currentLocation.strip('/').split('/')
         if len(parts) == 1:
-            # If there is only one part, it's the bucket name and there is no directory
             return parts[0], ''
         else:
-            # If there are more than one parts, the first is the bucket name, and the rest is the directory path
             return parts[0], '/'.join(parts[1:])
-        
+
+    # Changes the current location in the S3 space.
     def changeLocation(self, command):
         try:
             _, newLocation = command.split()
 
-            # Ensure the new location starts with '/'
-            if not newLocation.startswith('/'):
-                raise ValueError("Invalid location format. Location must start with '/'.")
+            if newLocation == '..':
+                parts = self.currentLocation.strip('/').split('/')
+                if len(parts) > 1:
+                    self.currentLocation = '/'.join(parts[:-1])
+                else:
+                    self.currentLocation = '/'
+            elif newLocation == '../..':
+                parts = self.currentLocation.strip('/').split('/')
+                if len(parts) > 2:
+                    self.currentLocation = '/'.join(parts[:-2])
+                else:
+                    self.currentLocation = '/'
+            else:
+                if not newLocation.startswith('/'):
+                    raise ValueError("Invalid location format. Location must start with '/'.")
 
-            self.currentLocation = newLocation
+                self.currentLocation = newLocation
+
             print(f"Changing location to: {self.currentLocation}")
 
-            # Change the directory in AWS S3 using boto3
             bucket_name, directory_path = self.get_bucket_and_directory()
             bucket = self.s3_resource.Bucket(bucket_name)
 
-            # Check if the directory exists
             for obj in bucket.objects.filter(Prefix=directory_path):
                 if obj.key == directory_path:
                     print(f"S5{self.currentLocation}>", end=" ")
@@ -165,12 +169,29 @@ class S5Shell:
             print(f"S5{self.currentLocation}>", end=" ")
             return 1
 
+    # Displays the current working location in the S3 space.
+    def currentWorkingLocation(self):
+        try:
+            if self.currentLocation == '/':
+                print("/")
+                print(f"S5{self.currentLocation}>", end=" ")
+                return 0
+            else:
+                print(f"{self.currentLocation[1:]}:{self.currentLocation}")
+                print(f"S5{self.currentLocation}>", end=" ")
+                return 0
+
+        except Exception as e:
+            print(f"Cannot access location in S3 space. Error: {str(e)}")
+            print(f"S5{self.currentLocation}>", end=" ")
+            return 1
+
+    # Lists the contents of an S3 location specified in the command.
     def listContents(self, command):
         try:
             _, s3Location = command.split()
 
             if s3Location == '/':
-                # List buckets if the specified location is '/'
                 response = self.s3Client.list_buckets()
                 buckets = [bucket['Name'] for bucket in response['Buckets']]
 
@@ -179,7 +200,6 @@ class S5Shell:
                 else:
                     print("\n".join(buckets))
             else:
-                # List objects in the specified S3 location
                 response = self.s3Client.list_objects(Bucket=s3Location[1:], Delimiter='/')
 
                 if 'Contents' in response:
@@ -195,6 +215,7 @@ class S5Shell:
             print(f"S5{self.currentLocation}>", end=" ")
             return 1
 
+    # Enters a loop to accept and process user commands until the user decides to quit.
     def runShell(self):
         while True:
             command = input()
