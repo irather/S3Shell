@@ -50,8 +50,7 @@ This is a Python-based shell for interacting with AWS S3 storage.
 
 ## Usage
 
-- Use the provided commands within the shell to interact with your AWS S3 storage.
-- Follow the on-screen instructions and command syntax.
+- Use the provided commands within the runShell() function to interact with the AWS S3 storage.
 
 ## Notes
 

@@ -142,6 +142,8 @@ class S5Shell:
                     self.currentLocation = '/'.join(parts[:-2])
                 else:
                     self.currentLocation = '/'
+            elif newLocation == '/':
+                self.currentLocation = '/'
             else:
                 if not newLocation.startswith('/'):
                     raise ValueError("Invalid location format. Location must start with '/'.")
